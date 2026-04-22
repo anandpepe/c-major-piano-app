@@ -525,7 +525,20 @@
     }
 
     function generateProgression() {
-      const firstFive = Array.from({ length: 5 }, () => withDrop2({ ...randomChoice(CHORDS), notes: [...randomChoice(CHORDS).notes] }));
+      const firstFive = [];
+
+      for (let i = 0; i < 5; i += 1) {
+        let randomChord = randomChoice(CHORDS);
+
+        if (i > 0) {
+          while (randomChord.roman === firstFive[i - 1].roman) {
+            randomChord = randomChoice(CHORDS);
+          }
+        }
+
+        firstFive.push(withDrop2({ ...randomChord, notes: [...randomChord.notes] }));
+      }
+
       return [...firstFive, ...CADENCE.map(ch => withDrop2({ ...ch, notes: [...ch.notes] }))];
     }
 
