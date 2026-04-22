@@ -412,7 +412,7 @@
           <ul>
             <li>1~5마디: Imaj7, ii7, iii7, IVmaj7, V7, vi7, viiø7 중 랜덤 선택</li>
             <li>6~8마디: ii7–V7–Imaj7 고정</li>
-            <li>모든 코드는 Drop-2 보이싱으로 재생</li>
+            <li>모든 코드는 Drop-2 기본형에서 시작한 뒤, 직전 마디 기준 근접 보이싱으로 재배치</li>
             <li>볼륨 / 템포 / 음표 길이 실시간 조절 가능</li>
             <li>온음표 / 2분음표 / 4분음표에 따라 악보 음표 개수와 모양이 바뀜</li>
           </ul>
@@ -508,6 +508,79 @@
       return { ...chord, notes: toDrop2(chord.notes) };
     }
 
+    function noteToMidi(note) {
+      return NOTE_TO_MIDI[note];
+    }
+
+    function midiToNote(midi) {
+      return Object.keys(NOTE_TO_MIDI).find(key => NOTE_TO_MIDI[key] === midi) || null;
+    }
+
+    function normalizeAscending(midis) {
+      const sorted = midis.slice().sort((a, b) => a - b);
+      for (let i = 1; i < sorted.length; i += 1) {
+        while (sorted[i] <= sorted[i - 1]) {
+          sorted[i] += 12;
+        }
+      }
+      return sorted;
+    }
+
+    function movementCost(prevMidis, candMidis) {
+      let total = 0;
+      for (let i = 0; i < Math.min(prevMidis.length, candMidis.length); i += 1) {
+        total += Math.abs(prevMidis[i] - candMidis[i]);
+      }
+      return total;
+    }
+
+    function generateCloseVoicing(prevNotes, targetNotes) {
+      const baseMidis = targetNotes.map(noteToMidi);
+      const prevMidis = prevNotes.map(noteToMidi);
+      const offsets = [-12, 0, 12];
+      let best = normalizeAscending(baseMidis);
+      let bestCost = Number.POSITIVE_INFINITY;
+
+      for (const o0 of offsets) {
+        for (const o1 of offsets) {
+          for (const o2 of offsets) {
+            for (const o3 of offsets) {
+              const candidate = normalizeAscending([
+                baseMidis[0] + o0,
+                baseMidis[1] + o1,
+                baseMidis[2] + o2,
+                baseMidis[3] + o3,
+              ]);
+
+              if (candidate[0] < 43 || candidate[candidate.length - 1] > 84) continue;
+
+              const cost = movementCost(prevMidis, candidate);
+              if (cost < bestCost) {
+                best = candidate;
+                bestCost = cost;
+              }
+            }
+          }
+        }
+      }
+
+      return best.map(midiToNote).filter(Boolean);
+    }
+
+    function applyVoiceLeading(progression) {
+      if (!progression.length) return progression;
+      const voiced = [{ ...progression[0], notes: progression[0].notes.slice() }];
+
+      for (let i = 1; i < progression.length; i += 1) {
+        const prev = voiced[i - 1];
+        const current = progression[i];
+        const closeNotes = generateCloseVoicing(prev.notes, current.notes);
+        voiced.push({ ...current, notes: closeNotes });
+      }
+
+      return voiced;
+    }
+
     function getHitsPerBar(noteValue) {
       return noteValue === 1 ? 1 : noteValue === 2 ? 2 : 4;
     }
@@ -548,7 +621,12 @@
         firstFive.push(withDrop2({ ...randomChord, notes: [...randomChord.notes] }));
       }
 
-      return [...firstFive, ...CADENCE.map(ch => withDrop2({ ...ch, notes: [...ch.notes] }))];
+      const rawProgression = [
+        ...firstFive,
+        ...CADENCE.map(ch => withDrop2({ ...ch, notes: [...ch.notes] })),
+      ];
+
+      return applyVoiceLeading(rawProgression);
     }
 
     function clearTimers() {
@@ -918,6 +996,10 @@
       console.assert(lowerOctave("G4") === "G3", "lowerOctave check failed");
       console.assert(JSON.stringify(toDrop2(["C4", "E4", "G4", "B4"])) === JSON.stringify(["C4", "G3", "E4", "B4"]), "Drop-2 check failed");
       console.assert(getHitsPerBar(1) === 1 && getHitsPerBar(2) === 2 && getHitsPerBar(4) === 4, "Rhythm check failed");
+      console.assert(
+        JSON.stringify(generateCloseVoicing(["C4", "G3", "E4", "B4"], ["A3", "E3", "C4", "G4"])) !== "[]",
+        "Voice leading check failed"
+      );
       state.progression = generateProgression();
       render();
     })();
